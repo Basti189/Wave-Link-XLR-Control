@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>🎙️ Mikrofon Control (Auto)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 2em;
+      background: #222;
+      color: #fff;
+    }
+    button {
+      font-size: 1.5em;
+      padding: 1em 2em;
+      margin-right: 1em;
+      cursor: pointer;
+    }
+    #levelBar {
+      width: 300px;
+      height: 25px;
+      background: #555;
+      margin-top: 1em;
+    }
+    #levelFill {
+      height: 100%;
+      background: lime;
+      width: 0%;
+    }
+    #log {
+      margin-top: 2em;
+      white-space: pre-wrap;
+      background: #000;
+      color: #0f0;
+      padding: 1em;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎚️ Mikrofon Control (Wave Link)</h1>
+  <button id="muteBtn" onclick="toggleMicMute()">🔇 Toggle Mute</button>
+  <div id="levelBar"><div id="levelFill"></div></div>
+  <div id="log">[Verbinde mit WebSocket…]</div>
+
+  <script>
+    let micIdentifier = null;
+    let isMuted = false;
+    let rpcId = 1;
+
+    const log = msg => {
+      document.getElementById("log").textContent += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
+    };
+
+    const socket = new WebSocket("ws://localhost:1824");
+
+    socket.addEventListener("open", () => {
+      log("✅ Verbunden mit WebSocket");
+      rpcCall("getMicrophoneConfig");
+    });
+
+    socket.addEventListener("message", event => {
+      const data = JSON.parse(event.data);
+
+      if (data.method === "microphoneConfigChanged") {
+        if (data.params.identifier === micIdentifier && data.params.property === "Microphone Mute") {
+          isMuted = data.params.value;
+          updateButton();
+        }
+      } else if (data.method === "realTimeChanges") {
+        if (micIdentifier && data.params?.microphoneLevel) {
+          const level = Math.max(data.params.microphoneLevel.levelLeft, data.params.microphoneLevel.levelRight);
+          updateLevel(level);
+        }
+      } else if (data.result && Array.isArray(data.result)) {
+        const mic = data.result[0];
+        if (mic?.identifier) {
+          micIdentifier = mic.identifier;
+          isMuted = mic.isMicMuted;
+          updateButton();
+          log("🎤 Mikrofon erkannt: " + micIdentifier);
+        }
+      } else {
+        log(`📥 ${JSON.stringify(data, null, 2)}`);
+      }
+    });
+
+    function rpcCall(method, params = {}) {
+      const msg = {
+        jsonrpc: "2.0",
+        id: rpcId++,
+        method,
+        params
+      };
+      socket.send(JSON.stringify(msg));
+      log(`📤 ${JSON.stringify(msg)}`);
+    }
+
+    function toggleMicMute() {
+      if (!micIdentifier) return;
+      isMuted = !isMuted;
+      rpcCall("setMicrophoneConfig", {
+        identifier: micIdentifier,
+        property: "Microphone Mute",
+        value: isMuted
+      });
+    }
+
+    function updateButton() {
+      document.getElementById("muteBtn").textContent = isMuted ? "🎙️ Einschalten" : "🔇 Ausschalten";
+    }
+
+    function updateLevel(value) {
+      const percent = Math.min(100, Math.round(value * 100));
+      document.getElementById("levelFill").style.width = percent + "%";
+    }
+  </script>
+</body>
+</html>
